@@ -51,8 +51,6 @@ jobs:
 
            -- Home Lab Everywhere <support@hle.world>  ${DATE_RFC}
           EOF
-          # Remove leading whitespace that heredoc may introduce
-          sed -i 's/^          //' debian/changelog
 
       - name: Build debian package
         run: dpkg-buildpackage -b -uc -us
