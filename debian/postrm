@@ -1,0 +1,47 @@
+#!/bin/sh
+set -e
+
+HLE_USER="hle-client"
+VENV_DIR="/opt/hle-client/venv"
+
+case "$1" in
+    remove)
+        # Reload systemd so it stops tracking the removed unit
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+        ;;
+
+    purge)
+        # Remove the virtual environment and its parent directory
+        rm -rf "$VENV_DIR"
+        if [ -d /opt/hle-client ] && [ -z "$(ls -A /opt/hle-client 2>/dev/null)" ]; then
+            rmdir /opt/hle-client
+        fi
+
+        # Reload systemd
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+
+        # Remove the dedicated system user and group (also removes home dir)
+        if getent passwd "$HLE_USER" > /dev/null 2>&1; then
+            deluser --remove-home "$HLE_USER" 2>/dev/null || true
+        fi
+        if getent group "$HLE_USER" > /dev/null 2>&1; then
+            delgroup "$HLE_USER" 2>/dev/null || true
+        fi
+        ;;
+
+    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

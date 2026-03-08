@@ -32,3 +32,14 @@ htmlcov/
 
 # Distribution
 *.tar.gz
+
+# Debian package build artifacts
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/tmp/
+debian/hle-client/
+*.deb
+*.buildinfo
+*.changes

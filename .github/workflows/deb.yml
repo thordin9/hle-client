@@ -1,0 +1,98 @@
+name: Build Debian Package
+
+# Build a .deb package and attach it to the GitHub release whenever a new
+# release is published.  The deb is built from the release tag source,
+# installs hle-client into a Python venv via postinst, and ships a ready-to-use
+# systemd service unit.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-deb:
+    runs-on: arc-runner-hle-client
+    container:
+      image: ubuntu:22.04
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      RELEASE_ID: ${{ github.event.release.id }}
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            debhelper devscripts dpkg-dev curl ca-certificates
+
+      - uses: actions/checkout@v4.1.7
+
+      - name: Derive and validate version
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          # Strict semver validation
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: Invalid version format: $VERSION"
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Stamp debian/changelog with release version
+        run: |
+          DATE_RFC=$(date -R)
+          cat > debian/changelog << EOF
+          hle-client (${VERSION}-1) stable; urgency=medium
+
+            * Release ${VERSION}.
+
+           -- Home Lab Everywhere <support@hle.world>  ${DATE_RFC}
+          EOF
+          # Remove leading whitespace that heredoc may introduce
+          sed -i 's/^          //' debian/changelog
+
+      - name: Build debian package
+        run: dpkg-buildpackage -b -uc -us
+
+      - name: Locate built package
+        run: |
+          DEB_FILE=$(ls ../hle-client_${VERSION}-1_all.deb)
+          echo "DEB_FILE=${DEB_FILE}" >> "$GITHUB_ENV"
+
+      - name: Upload .deb to release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          DEB_NAME="hle-client_${VERSION}-1_all.deb"
+          python3 - << 'PYEOF'
+          import json, os, urllib.request, pathlib
+
+          token   = os.environ["GITHUB_TOKEN"]
+          repo    = os.environ["REPO"]
+          rel_id  = os.environ["RELEASE_ID"]
+          version = os.environ["VERSION"]
+          deb_file = os.environ["DEB_FILE"]
+          deb_name = f"hle-client_{version}-1_all.deb"
+
+          data = pathlib.Path(deb_file).read_bytes()
+          url = (
+              f"https://uploads.github.com/repos/{repo}/releases"
+              f"/{rel_id}/assets?name={deb_name}"
+          )
+          req = urllib.request.Request(
+              url,
+              data=data,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Content-Type": "application/vnd.debian.binary-package",
+              },
+              method="POST",
+          )
+          resp = urllib.request.urlopen(req)
+          result = json.loads(resp.read())
+          print(f"Uploaded: {result['browser_download_url']}")
+          PYEOF
