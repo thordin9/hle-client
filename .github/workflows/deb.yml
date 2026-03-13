@@ -1,13 +1,22 @@
 name: Build Debian Package
 
-# Build a .deb package and attach it to the GitHub release whenever a new
-# release is published.  The deb is built from the release tag source,
-# installs hle-client into a Python venv via postinst, and ships a ready-to-use
-# systemd service unit.
+# Triggered two ways:
+#   1. Automatically when a GitHub release is published — attaches the .deb to
+#      the release as a downloadable asset.
+#   2. Manually via workflow_dispatch — builds from the current branch and
+#      uploads the .deb as a workflow artifact (useful for testing/pre-release).
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >
+          Version to embed in the .deb (e.g. 1.17.0).
+          Defaults to the version in pyproject.toml when left blank.
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -31,17 +40,26 @@ jobs:
 
       - uses: actions/checkout@v4.1.7
 
-      - name: Derive and validate version
+      - name: Resolve version
         run: |
-          VERSION="${RELEASE_TAG#v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${RELEASE_TAG#v}"
+          else
+            # Fall back to the version declared in pyproject.toml
+            VERSION=$(grep -m1 '^version' pyproject.toml | sed 's/.*"\(.*\)"/\1/')
+          fi
+
           # Strict semver validation
           if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "Error: Invalid version format: $VERSION"
             exit 1
           fi
+
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
 
-      - name: Stamp debian/changelog with release version
+      - name: Stamp debian/changelog with version
         run: |
           DATE_RFC=$(date -R)
           cat > debian/changelog << EOF
@@ -60,12 +78,13 @@ jobs:
           DEB_FILE=$(ls ../hle-client_${VERSION}-1_all.deb)
           echo "DEB_FILE=${DEB_FILE}" >> "$GITHUB_ENV"
 
+      # On a real release: attach the .deb directly to the GitHub release.
       - name: Upload .deb to release
+        if: github.event_name == 'release'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
-          DEB_NAME="hle-client_${VERSION}-1_all.deb"
           python3 - << 'PYEOF'
           import json, os, urllib.request, pathlib
 
@@ -94,3 +113,13 @@ jobs:
           result = json.loads(resp.read())
           print(f"Uploaded: {result['browser_download_url']}")
           PYEOF
+
+      # On a manual dispatch: upload the .deb as a workflow run artifact so it
+      # can be downloaded from the Actions run summary page.
+      - name: Upload .deb as workflow artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hle-client_${{ env.VERSION }}-1_all
+          path: ${{ env.DEB_FILE }}
+          retention-days: 30
