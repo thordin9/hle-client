@@ -135,7 +135,28 @@ else
   FILES_CHANGED+=(install.sh)
 fi
 
-# 5. CHANGELOG.md — add new entry at top (after the # Changelog header)
+# 5. debian/changelog — bump version and date
+echo "Updating debian/changelog..."
+DATE_RFC=$(date -R)
+DEB_CHANGELOG_ENTRY="hle-client ($VERSION-1) stable; urgency=medium
+
+  * Release $VERSION.
+
+ -- Home Lab Everywhere <support@hle.world>  $DATE_RFC
+"
+
+if $DRY_RUN; then
+  echo "Would prepend to debian/changelog:"
+  echo "$DEB_CHANGELOG_ENTRY"
+else
+  TEMP=$(mktemp)
+  printf "%s" "$DEB_CHANGELOG_ENTRY" > "$TEMP"
+  cat debian/changelog >> "$TEMP"
+  mv "$TEMP" debian/changelog
+  FILES_CHANGED+=(debian/changelog)
+fi
+
+# 6. CHANGELOG.md — add new entry at top (after the # Changelog header)
 echo "Updating CHANGELOG.md..."
 DATE=$(date +%Y-%m-%d)
 CHANGELOG_ENTRY="## v$VERSION — $DATE

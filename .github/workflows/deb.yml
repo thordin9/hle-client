@@ -1,0 +1,125 @@
+name: Build Debian Package
+
+# Triggered two ways:
+#   1. Automatically when a GitHub release is published — attaches the .deb to
+#      the release as a downloadable asset.
+#   2. Manually via workflow_dispatch — builds from the current branch and
+#      uploads the .deb as a workflow artifact (useful for testing/pre-release).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >
+          Version to embed in the .deb (e.g. 1.17.0).
+          Defaults to the version in pyproject.toml when left blank.
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build-deb:
+    runs-on: arc-runner-hle-client
+    container:
+      image: ubuntu:22.04
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      RELEASE_ID: ${{ github.event.release.id }}
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            debhelper devscripts dpkg-dev curl ca-certificates python3
+
+      - uses: actions/checkout@v4.1.7
+
+      - name: Resolve version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${RELEASE_TAG#v}"
+          else
+            # Fall back to the version declared in pyproject.toml
+            VERSION=$(grep -m1 '^version' pyproject.toml | sed 's/.*"\(.*\)"/\1/')
+          fi
+
+          # Strict semver validation
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: Invalid version format: $VERSION"
+            exit 1
+          fi
+
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Stamp debian/changelog with version
+        run: |
+          DATE_RFC=$(date -R)
+          cat > debian/changelog << EOF
+          hle-client (${VERSION}-1) stable; urgency=medium
+
+            * Release ${VERSION}.
+
+           -- Home Lab Everywhere <support@hle.world>  ${DATE_RFC}
+          EOF
+
+      - name: Build debian package
+        run: dpkg-buildpackage -b -uc -us
+
+      - name: Locate built package
+        run: |
+          DEB_FILE=$(ls ../hle-client_${VERSION}-1_all.deb)
+          echo "DEB_FILE=${DEB_FILE}" >> "$GITHUB_ENV"
+
+      # On a real release: attach the .deb directly to the GitHub release.
+      - name: Upload .deb to release
+        if: github.event_name == 'release'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - << 'PYEOF'
+          import json, os, urllib.request, pathlib
+
+          token   = os.environ["GITHUB_TOKEN"]
+          repo    = os.environ["REPO"]
+          rel_id  = os.environ["RELEASE_ID"]
+          version = os.environ["VERSION"]
+          deb_file = os.environ["DEB_FILE"]
+          deb_name = f"hle-client_{version}-1_all.deb"
+
+          data = pathlib.Path(deb_file).read_bytes()
+          url = (
+              f"https://uploads.github.com/repos/{repo}/releases"
+              f"/{rel_id}/assets?name={deb_name}"
+          )
+          req = urllib.request.Request(
+              url,
+              data=data,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Content-Type": "application/vnd.debian.binary-package",
+              },
+              method="POST",
+          )
+          resp = urllib.request.urlopen(req)
+          result = json.loads(resp.read())
+          print(f"Uploaded: {result['browser_download_url']}")
+          PYEOF
+
+      # On a manual dispatch: upload the .deb as a workflow run artifact so it
+      # can be downloaded from the Actions run summary page.
+      - name: Upload .deb as workflow artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hle-client_${{ env.VERSION }}-1_all
+          path: ${{ env.DEB_FILE }}
+          retention-days: 30

@@ -1,0 +1,31 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove)
+        if [ -d /run/systemd/system ]; then
+            systemctl stop hle-client.service 2>/dev/null || true
+            systemctl disable hle-client.service 2>/dev/null || true
+        fi
+        ;;
+
+    upgrade|deconfigure)
+        # Stop the service for the duration of the upgrade but preserve the
+        # enabled/disabled state so the user's preference is retained.
+        if [ -d /run/systemd/system ]; then
+            systemctl stop hle-client.service 2>/dev/null || true
+        fi
+        ;;
+
+    failed-upgrade)
+        ;;
+
+    *)
+        echo "prerm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

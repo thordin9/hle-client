@@ -1,0 +1,27 @@
+[Unit]
+Description=Home Lab Everywhere Client
+Documentation=https://hle.world
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hle-client
+Group=hle-client
+WorkingDirectory=/var/lib/hle-client
+EnvironmentFile=-/etc/default/hle-client
+ExecStartPre=/bin/sh -c 'test -n "${HLE_SERVICE_URL}" || { echo "HLE_SERVICE_URL is not set in /etc/default/hle-client"; exit 1; }'
+ExecStart=/opt/hle-client/venv/bin/hle expose --service ${HLE_SERVICE_URL}
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/hle-client
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,25 @@
+#!/usr/bin/make -f
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	:
+
+override_dh_auto_build:
+	:
+
+override_dh_auto_test:
+	:
+
+override_dh_auto_install:
+	# Explicitly install the environment template so it lands in
+	# /etc/default/hle-client regardless of whether a SysV init script exists.
+	install -D -m 644 debian/hle-client.default \
+		debian/hle-client/etc/default/hle-client
+
+override_dh_installsystemd:
+	# Install the unit and wire up maintainer-script hooks, but do NOT
+	# automatically enable or start the service on first install.
+	dh_installsystemd --no-enable --no-start

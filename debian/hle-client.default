@@ -1,0 +1,21 @@
+# HLE Client environment configuration
+# Edit this file to configure the HLE Client service.
+#
+# After editing, run:
+#   sudo systemctl enable --now hle-client
+# or, if already running:
+#   sudo systemctl restart hle-client
+
+# URL of the local service to expose (required).
+# Examples: http://localhost:8080   http://192.168.1.50:3000
+#HLE_SERVICE_URL=http://localhost:8080
+
+# Authentication mode: sso (default) or none
+#HLE_AUTH=sso
+
+# Custom zone domain for enterprise routing (optional)
+#HLE_ZONE=
+
+# API key — can also be stored in /var/lib/hle-client/.config/hle/config.toml
+# (set by running: sudo -u hle-client /opt/hle-client/venv/bin/hle auth login)
+#HLE_API_KEY=

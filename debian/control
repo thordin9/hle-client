@@ -1,0 +1,22 @@
+Source: hle-client
+Section: net
+Priority: optional
+Maintainer: Home Lab Everywhere <support@hle.world>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: https://hle.world
+
+Package: hle-client
+Architecture: all
+Depends: ${misc:Depends}, python3 (>= 3.11), python3-venv, adduser
+Description: Home Lab Everywhere tunnel client
+ HLE Client exposes homelab services to the internet with built-in SSO.
+ .
+ This package installs hle-client in an isolated Python virtual environment
+ under /opt/hle-client/venv and runs it as a dedicated system user
+ (hle-client) via a systemd service.
+ .
+ After installation, set HLE_SERVICE_URL in /etc/default/hle-client (and
+ optionally configure an API key), then run:
+   sudo systemctl enable --now hle-client
