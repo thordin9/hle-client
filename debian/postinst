@@ -29,14 +29,27 @@ case "$1" in
         chown "$HLE_USER:$HLE_USER" "$HLE_HOME"
         chmod 750 "$HLE_HOME"
 
-        # Create the Python virtual environment and install hle-client from PyPI
+        # Install hle-client from PyPI into the virtual environment.
+        # NOTE: This step requires outbound network access to pypi.org.
+        # If the install fails (e.g. no internet), re-run after restoring
+        # connectivity: dpkg --configure hle-client
         VERSION=$(dpkg-query -W -f='${Version}' hle-client 2>/dev/null | sed 's/-.*//')
         if [ ! -d "$VENV_DIR" ] || [ ! -x "$VENV_DIR/bin/hle" ]; then
             python3 -m venv "$VENV_DIR"
-            "$VENV_DIR/bin/pip" install --quiet "hle-client==$VERSION"
+            if ! "$VENV_DIR/bin/pip" install --quiet "hle-client==$VERSION"; then
+                echo "Error: Failed to install hle-client==$VERSION from PyPI." >&2
+                echo "  Ensure the system has internet access to pypi.org, then" >&2
+                echo "  re-run: dpkg --configure hle-client" >&2
+                exit 1
+            fi
         elif [ -x "$VENV_DIR/bin/pip" ]; then
             # Upgrade existing installation to the new version
-            "$VENV_DIR/bin/pip" install --quiet --upgrade "hle-client==$VERSION"
+            if ! "$VENV_DIR/bin/pip" install --quiet --upgrade "hle-client==$VERSION"; then
+                echo "Error: Failed to upgrade hle-client to $VERSION from PyPI." >&2
+                echo "  Ensure the system has internet access to pypi.org, then" >&2
+                echo "  re-run: dpkg --configure hle-client" >&2
+                exit 1
+            fi
         fi
         chown -R "$HLE_USER:$HLE_USER" "$VENV_DIR"
 

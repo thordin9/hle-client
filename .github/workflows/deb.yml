@@ -36,7 +36,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            debhelper devscripts dpkg-dev curl ca-certificates
+            debhelper devscripts dpkg-dev curl ca-certificates python3
 
       - uses: actions/checkout@v4.1.7
 
