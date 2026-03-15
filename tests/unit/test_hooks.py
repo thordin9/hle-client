@@ -6,7 +6,7 @@ import asyncio
 import os
 import stat
 import tempfile
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -252,4 +252,118 @@ class TestHookRunnerFire:
                 "t",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+            )
+
+    @pytest.mark.asyncio
+    async def test_timeout_kills_process(self) -> None:
+        """A hook script that exceeds HOOK_TIMEOUT is killed."""
+        runner = HookRunner(hooks={"tunnel_established": "/bin/sleep"})
+        with patch("hle_client.hooks.asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError)
+            mock_proc.kill = MagicMock()
+            mock_proc.wait = AsyncMock()
+            mock_exec.return_value = mock_proc
+
+            with patch("hle_client.hooks.logger") as mock_logger:
+                await runner.fire(
+                    "tunnel_established",
+                    subdomain="x",
+                    public_url="u",
+                    tunnel_id="t",
+                )
+                mock_proc.kill.assert_called_once()
+                mock_proc.wait.assert_awaited_once()
+                mock_logger.warning.assert_called_once()
+                assert "timed out" in mock_logger.warning.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_info_log_does_not_leak_full_args(self) -> None:
+        """INFO log should only contain hook name and executable, not full arguments."""
+        runner = HookRunner(hooks={"tunnel_established": "/usr/bin/my-script.sh"})
+        with patch("hle_client.hooks.asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            with patch("hle_client.hooks.logger") as mock_logger:
+                await runner.fire(
+                    "tunnel_established",
+                    subdomain="secret-sub",
+                    public_url="https://secret.hle.world",
+                    tunnel_id="tid-secret",
+                )
+                # INFO log should contain only the executable path
+                info_call = mock_logger.info.call_args
+                formatted = info_call[0][0] % info_call[0][1:]
+                assert "/usr/bin/my-script.sh" in formatted
+                assert "secret-sub" not in formatted
+                assert "tid-secret" not in formatted
+
+                # DEBUG log should contain the full command
+                debug_call = mock_logger.debug.call_args_list[0]
+                debug_formatted = debug_call[0][0] % debug_call[0][1:]
+                assert "secret-sub" in debug_formatted
+
+
+# ---------------------------------------------------------------------------
+# Tunnel integration: HookRunner.fire called at lifecycle events
+# ---------------------------------------------------------------------------
+
+
+class TestTunnelHookIntegration:
+    @pytest.mark.asyncio
+    async def test_tunnel_established_hook_fired_after_ack(self) -> None:
+        """HookRunner.fire('tunnel_established', ...) is invoked after TUNNEL_ACK."""
+        from hle_client.tunnel import Tunnel, TunnelConfig
+
+        config = TunnelConfig(
+            service_url="http://localhost:8080",
+            api_key="test-key",
+            hooks={"tunnel_established": "/usr/bin/on-up.sh"},
+        )
+        tunnel = Tunnel(config=config)
+
+        with patch.object(tunnel._hook_runner, "fire", new_callable=AsyncMock) as mock_fire:
+            # Patch _receive_loop so _connect_once returns after firing hook
+            with patch.object(tunnel, "_receive_loop", new_callable=AsyncMock):
+                # Simulate the TUNNEL_ACK response
+                from hle_common.protocol import MessageType, ProtocolMessage
+
+                ack_payload = {
+                    "tunnel_id": "tid-42",
+                    "public_url": "https://app.hle.world",
+                    "subdomain": "app",
+                    "websocket_enabled": True,
+                    "user_code": "ABC123",
+                    "service_label": "test-service",
+                }
+                ack_msg = ProtocolMessage(
+                    type=MessageType.TUNNEL_ACK, payload=ack_payload
+                )
+
+                mock_ws = AsyncMock()
+                mock_ws.send = AsyncMock()
+                mock_ws.recv = AsyncMock(return_value=ack_msg.model_dump_json())
+
+                with (
+                    patch.object(
+                        tunnel,
+                        "_discover_relay_uri",
+                        new_callable=AsyncMock,
+                        return_value="wss://relay.hle.world/_hle/tunnel",
+                    ),
+                    patch("hle_client.tunnel.websockets.connect") as mock_connect,
+                ):
+                    mock_connect.return_value.__aenter__ = AsyncMock(return_value=mock_ws)
+                    mock_connect.return_value.__aexit__ = AsyncMock(return_value=False)
+
+                    await tunnel._connect_once()
+
+            mock_fire.assert_any_call(
+                "tunnel_established",
+                subdomain="app",
+                public_url="https://app.hle.world",
+                tunnel_id="tid-42",
             )

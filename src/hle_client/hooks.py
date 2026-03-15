@@ -9,6 +9,9 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+#: Maximum seconds a hook script is allowed to run before being killed.
+HOOK_TIMEOUT: int = 30
+
 
 # ---------------------------------------------------------------------------
 # Hook registry — known hook names and the arguments they provide.
@@ -79,7 +82,8 @@ class HookRunner:
         args = [kwargs.get(name, "") for name in arg_names]
 
         cmd = shlex.split(script) + args
-        logger.info("Firing hook %s: %s", hook_name, cmd)
+        logger.info("Firing hook %s: %s", hook_name, cmd[0])
+        logger.debug("Hook %s full command: %s", hook_name, cmd)
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -87,7 +91,17 @@ class HookRunner:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await process.communicate()
+            try:
+                _stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=HOOK_TIMEOUT
+                )
+            except TimeoutError:
+                process.kill()
+                await process.wait()
+                logger.warning(
+                    "Hook %s timed out after %ds and was killed", hook_name, HOOK_TIMEOUT
+                )
+                return
             if process.returncode != 0:
                 logger.warning(
                     "Hook %s exited with code %d: %s",
