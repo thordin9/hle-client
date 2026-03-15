@@ -33,13 +33,13 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -n "$FROM_SOURCE" ] && [ -n "$VERSION" ]; then
-    echo "--from-source and --version are mutually exclusive" >&2
+    echo "Error: --from-source and --version are mutually exclusive. Use either --from-source <path> or --version <version>." >&2
     exit 1
 fi
 
 if [ -n "$FROM_SOURCE" ]; then
     SOURCE_DIR=$(cd "$FROM_SOURCE" 2>/dev/null && pwd) || {
-        echo "Cannot access directory: $FROM_SOURCE" >&2
+        echo "Error: Cannot access directory '$FROM_SOURCE'. Ensure the directory exists and you have read permissions." >&2
         exit 1
     }
     if [ ! -f "$SOURCE_DIR/pyproject.toml" ]; then
